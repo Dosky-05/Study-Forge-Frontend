@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="theme-color" content="#0c0c1a">
+    <title>StudyForge</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #0c0c1a;
+            color: #ede0c4;
+            font-family: 'Georgia', serif;
+            overflow-x: hidden;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #f0b42933;
+            border-radius: 3px;
+        }
+
+        button {
+            font-family: 'Georgia', serif;
+            transition: opacity .15s, transform .15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        button:active:not(:disabled) {
+            opacity: .8;
+            transform: scale(.97);
+        }
+
+        button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        input,
+        select,
+        textarea {
+            font-family: 'Georgia', serif;
+        }
+
+        input[type=checkbox] {
+            accent-color: #f0b429;
+            width: auto;
+            cursor: pointer;
+        }
+
+        @media(hover:hover) {
+            button:hover:not(:disabled) {
+                opacity: .85;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback } = React;
+
+        // ── Storage helpers (localStorage for persistence across sessions) ──
+        const LS = {
+            get: (k, def = null) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+            set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
+        };
+
+        // ── AI ──
+        async function ai(messages, system = "", useSearch = false) {
+            const apiKey = LS.get("sf_apikey", "");
+            if (!apiKey) throw new Error("No API key set");
+            const body = { model: "claude-haiku-4-5-20251001", max_tokens: 1200, messages };
+            if (system) body.system = system;
+            if (useSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+            const r = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+                body: JSON.stringify(body)
+            });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error.message);
+            return (d.content || []).filter(b => b.type === "text").map(b => b.text).join("\n") || "";
+        }
+
+        function parseJSON(text) {
+            const clean = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+            try { return JSON.parse(clean); } catch { }
+            const m = clean.match(/\[[\s\S]*\]/);
+            if (m) try { return JSON.parse(m[0]); } catch { }
+            return null;
+        }
+
+        function sm2(card, q) {
+            const ef = Math.max(1.3, (card.ef ?? 2.5) + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+            const reps = q < 2 ? 0 : (card.reps ?? 0) + 1;
+            const iv = q < 2 ? 1 : reps === 1 ? 1 : reps === 2 ? 6 : Math.round((card.interval ?? 1) * ef);
+            const due = new Date(); due.setDate(due.getDate() + iv);
+            return { ...card, ef, reps, interval: iv, due: due.toISOString() };
+        }
+
+        async function readFileData(file) {
+            return new Promise(res => {
+                const reader = new FileReader();
+                if (file.name.match(/\.pdf$/i)) {
+                    reader.onload = e => res({ b64: e.target.result.split(",")[1], text: null });
+                    reader.readAsDataURL(file);
+                } else {
+                    reader.onload = e => res({ text: e.target.result || "", b64: null });
+                    reader.readAsText(file);
+                }
+            });
+        }
+
+        // ── Theme ──
+        const C = { bg: "#0c0c1a", s: "#12122a", s2: "#181830", b: "#25254a", a: "#f0b429", aD: "#f0b42920", tx: "#ede0c4", mu: "#7878a0", gr: "#4ade80", re: "#f87171", bl: "#60a5fa", pu: "#c084fc" };
+        const card = (ex = {}) => ({ background: C.s, border: `1px solid ${C.b}`, borderRadius: 12, padding: 16, ...ex });
+        const btn = (v = "p", ex = {}) => ({ background: v === "p" ? C.a : v === "d" ? C.re : v === "g" ? "#1a3a2a" : C.s2, color: v === "p" ? C.bg : v === "g" ? C.gr : C.tx, border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", ...ex });
+        const inp = (ex = {}) => ({ background: C.s2, border: `1px solid ${C.b}`, borderRadius: 8, padding: "10px 12px", color: C.tx, fontSize: 14, outline: "none", fontFamily: "inherit", width: "100%", ...ex });
+
+        // ── Toast ──
+        function Toast({ msg }) {
+            if (!msg) return null;
+            return <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: C.a, color: C.bg, padding: "10px 20px", borderRadius: 20, fontWeight: 700, fontSize: 14, zIndex: 9999, boxShadow: "0 4px 24px #0009", maxWidth: "90vw", textAlign: "center", whiteSpace: "pre-wrap" }}>{msg}</div>;
+        }
+
+        // ── API KEY SCREEN ──
+        function ApiKeyScreen({ onSave }) {
+            const [key, setKey] = useState("");
+            const [err, setErr] = useState("");
+            const [testing, setTesting] = useState(false);
+            const test = async () => {
+                if (!key.trim()) { setErr("Paste your API key first"); return; }
+                setTesting(true); setErr("");
+                try {
+                    LS.set("sf_apikey", key.trim());
+                    await ai([{ role: "user", content: "Say OK" }], "Reply with only OK");
+                    onSave();
+                } catch (e) { setErr("❌ Key didn't work: " + e.message); LS.set("sf_apikey", ""); }
+                setTesting(false);
+            };
+            return (
+                <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+                    <div style={{ ...card(), maxWidth: 400, width: "100%" }}>
+                        <div style={{ textAlign: "center", marginBottom: 24 }}>
+                            <div style={{ fontSize: 40, marginBottom: 8 }}>📚</div>
+                            <div style={{ fontFamily: "serif", fontSize: 24, color: C.a, fontWeight: 700 }}>StudyForge</div>
+                            <div style={{ fontSize: 13, color: C.mu, marginTop: 4 }}>Your AI Study Companion</div>
+                        </div>
+                        <div style={{ fontSize: 13, color: C.mu, marginBottom: 8 }}>Paste your Anthropic API key to get started. Your key is stored only on this device.</div>
+                        <input value={key} onChange={e => setKey(e.target.value)} placeholder="sk-ant-..." style={inp({ marginBottom: 10, letterSpacing: key ? "0.04em" : "normal" })} type="password" />
+                        {err && <div style={{ fontSize: 12, color: C.re, marginBottom: 10 }}>{err}</div>}
+                        <button onClick={test} style={{ ...btn(), width: "100%" }} disabled={testing || !key.trim()}>
+                            {testing ? "Testing key..." : "Save & Start →"}
+                        </button>
+                        <div style={{ fontSize: 11, color: C.mu, marginTop: 14, textAlign: "center" }}>
+                            Get your key at <span style={{ color: C.bl }}>console.anthropic.com</span> → API Keys<br />
+                            Uses Claude Haiku (~$0.001 per session)
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── MAIN APP ──
+        function App() {
+            const [ready, setReady] = useState(() => !!LS.get("sf_apikey", ""));
+            const [pg, setPg] = useState("dash");
+            const [files, setFiles] = useState(() => LS.get("sf_files", []));
+            const [plan, setPlan] = useState(() => LS.get("sf_plan", []));
+            const [cards, setCards] = useState(() => LS.get("sf_cards", []));
+            const [qHist, setQHist] = useState(() => LS.get("sf_qhist", []));
+            const [examWeeks, setExamWeeks] = useState(() => LS.get("sf_weeks", 4));
+            const [toast, setToast] = useState("");
+            const notify = (msg, dur = 3500) => { setToast(msg); setTimeout(() => setToast(""), dur); };
+
+            useEffect(() => LS.set("sf_files", files), [files]);
+            useEffect(() => LS.set("sf_plan", plan), [plan]);
+            useEffect(() => LS.set("sf_cards", cards), [cards]);
+            useEffect(() => LS.set("sf_qhist", qHist), [qHist]);
+            useEffect(() => LS.set("sf_weeks", examWeeks), [examWeeks]);
+
+            if (!ready) return <ApiKeyScreen onSave={() => setReady(true)} />;
+
+            const courseMap = {};
+            files.forEach(f => { const c = f.path.includes("/") ? f.path.split("/")[0] : "General"; (courseMap[c] = courseMap[c] || []).push(f); });
+            const courses = Object.entries(courseMap).map(([name, fs]) => ({ name, files: fs }));
+            const dueCards = cards.filter(c => !c.due || new Date(c.due) <= new Date());
+            const todayPlan = plan.filter(p => new Date(p.date).toDateString() === new Date().toDateString());
+            const p = { files, setFiles, courses, plan, setPlan, cards, setCards, qHist, setQHist, examWeeks, setExamWeeks, dueCards, todayPlan, notify, setPg };
+
+            const NAV = [
+                { id: "dash", icon: "⌂", label: "Home" },
+                { id: "files", icon: "⊞", label: "Files", badge: files.length || null },
+                { id: "plan", icon: "◎", label: "Plan", badge: todayPlan.filter(x => !x.done).length || null },
+                { id: "cards", icon: "◇", label: "Cards", badge: dueCards.length || null },
+                { id: "quiz", icon: "◉", label: "Quiz" },
+                { id: "prog", icon: "▲", label: "Stats" },
+            ];
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: C.bg, color: C.tx, fontFamily: "Georgia,serif" }}>
+                    <Toast msg={toast} />
+                    {/* Header */}
+                    <header style={{ background: C.s, borderBottom: `1px solid ${C.b}`, padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+                        <div>
+                            <span style={{ fontFamily: "serif", fontSize: 20, color: C.a, fontWeight: 700 }}>StudyForge</span>
+                            <span style={{ fontSize: 11, color: C.mu, marginLeft: 8 }}>exam in {examWeeks}w</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <input type="number" min={1} max={52} value={examWeeks} onChange={e => setExamWeeks(+e.target.value)}
+                                style={{ ...inp({ width: 52, padding: "5px 8px", textAlign: "center", fontSize: 15, fontWeight: 700, color: C.a }) }} />
+                            <span style={{ fontSize: 11, color: C.mu }}>weeks</span>
+                            <button onClick={() => { if (confirm("Change API key?")) LS.set("sf_apikey", ""), setReady(false); }} style={{ background: "none", border: "none", color: C.mu, cursor: "pointer", fontSize: 18, padding: "0 4px" }}>⚙</button>
+                        </div>
+                    </header>
+
+                    {/* Page */}
+                    <main style={{ flex: 1, padding: "16px 14px 80px", overflowY: "auto", maxWidth: 640, margin: "0 auto", width: "100%" }}>
+                        {pg === "dash" && <Dash {...p} />}
+                        {pg === "files" && <Files {...p} />}
+                        {pg === "plan" && <Plan {...p} />}
+                        {pg === "cards" && <Cards {...p} />}
+                        {pg === "quiz" && <Quiz {...p} />}
+                        {pg === "prog" && <Prog {...p} />}
+                    </main>
+
+                    {/* Bottom nav */}
+                    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.s, borderTop: `1px solid ${C.b}`, display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom)" }}>
+                        {NAV.map(n => (
+                            <button key={n.id} onClick={() => setPg(n.id)} style={{ flex: 1, padding: "10px 2px 8px", background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", position: "relative" }}>
+                                <span style={{ fontSize: 18, color: pg === n.id ? C.a : C.mu }}>{n.icon}</span>
+                                <span style={{ fontSize: 10, color: pg === n.id ? C.a : C.mu, fontWeight: pg === n.id ? 700 : 400 }}>{n.label}</span>
+                                {n.badge > 0 && <span style={{ position: "absolute", top: 6, right: "calc(50% - 18px)", background: C.re, color: "#fff", borderRadius: 8, padding: "0 5px", fontSize: 9, fontWeight: 700, lineHeight: "15px" }}>{n.badge}</span>}
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+            );
+        }
+
+        // ── DASHBOARD ──
+        function Dash({ courses, dueCards, todayPlan, plan, qHist, cards, setPg }) {
+            const done = plan.filter(p => p.done).length;
+            const avgQ = qHist.length ? Math.round(qHist.reduce((a, b) => a + b.pct, 0) / qHist.length) : 0;
+            const h = new Date().getHours();
+            const greet = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+            return (
+                <div>
+                    <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 22, color: C.a }}>{greet}! ✦</div>
+                        <div style={{ fontSize: 13, color: C.mu, marginTop: 2 }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+                        {[["Courses", courses.length, C.bl, "⬡"], ["Due Cards", dueCards.length, C.re, "◇"], ["Done", done, C.gr, "✓"], ["Quiz Avg", avgQ + "%", C.a, "◉"]].map(([l, v, col, icon]) => (
+                            <div key={l} style={{ ...card(), borderTop: `3px solid ${col}`, textAlign: "center", padding: 14 }}>
+                                <div style={{ fontSize: 24, color: col, fontWeight: 700, fontFamily: "serif" }}>{v}</div>
+                                <div style={{ fontSize: 11, color: C.mu, marginTop: 2 }}>{l}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ ...card(), marginBottom: 14 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 16, color: C.a, marginBottom: 12 }}>📅 Today's Reading</div>
+                        {todayPlan.length === 0 ? (
+                            <div>
+                                <div style={{ color: C.mu, fontSize: 13, marginBottom: 10 }}>No readings scheduled today.</div>
+                                <button onClick={() => setPg("plan")} style={{ ...btn("p"), fontSize: 13 }}>Generate Plan →</button>
+                            </div>
+                        ) : todayPlan.map(item => (
+                            <div key={item.id} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.b}` }}>
+                                <span style={{ fontSize: 16 }}>{item.done ? "✅" : "📖"}</span>
+                                <div>
+                                    <div style={{ fontSize: 14, fontWeight: 600, textDecoration: item.done ? "line-through" : "none", color: item.done ? C.mu : C.tx }}>{item.course}</div>
+                                    <div style={{ fontSize: 12, color: C.mu }}>{item.topic} · {item.pages}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ ...card() }}>
+                        <div style={{ fontFamily: "serif", fontSize: 16, color: C.a, marginBottom: 12 }}>⚡ Quick Actions</div>
+                        {[[dueCards.length ? `Review ${dueCards.length} Cards` : "No Cards Due", "cards", C.re], ["Upload Course Files", "files", C.bl], ["Generate Study Plan", "plan", C.gr], ["Take a Quiz", "quiz", C.a]].map(([l, id, col]) => (
+                            <button key={id} onClick={() => setPg(id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: C.s2, border: `1px solid ${C.b}`, borderLeft: `3px solid ${col}`, borderRadius: 8, padding: "11px 14px", marginBottom: 8, cursor: "pointer", color: C.tx, fontSize: 14 }}>
+                                <span style={{ color: col }}>{l}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // ── FILES ──
+        function Files({ files, setFiles, courses, notify }) {
+            const folderRef = useRef(); const filesRef = useRef();
+            const [loading, setLoading] = useState(false);
+            const [ytUrl, setYtUrl] = useState(""); const [ytLoad, setYtLoad] = useState(false);
+            const [ytCards, setYtCards] = useState(null);
+            const process = async (list) => {
+                const ok = list.filter(f => f.name.match(/\.(txt|md|pdf|csv|json|html|py|js|jsx|c|cpp|java)$/i));
+                if (!ok.length) { notify("No supported files found (PDF, TXT, MD, etc)"); return; }
+                setLoading(true);
+                const processed = await Promise.all(ok.map(async file => {
+                    const path = file.webkitRelativePath || file.name;
+                    const data = await readFileData(file);
+                    return { id: Math.random().toString(36).slice(2), name: file.name, path, ...data, size: file.size };
+                }));
+                setFiles(prev => {
+                    const paths = new Set(prev.map(f => f.path));
+                    return [...prev, ...processed.filter(f => !paths.has(f.path))];
+                });
+                setLoading(false);
+                notify(`✓ Loaded ${processed.length} file${processed.length !== 1 ? "s" : ""}`);
+            };
+            const handleYT = async () => {
+                if (!ytUrl.trim()) return;
+                setYtLoad(true); setYtCards(null);
+                try {
+                    const text = await ai([{ role: "user", content: `Search online for information about this YouTube video: ${ytUrl}\nGenerate 6 flashcards from what you find. Return ONLY JSON array: [{"q":"...","a":"..."}]` }], "Return only JSON array.", true);
+                    const parsed = parseJSON(text);
+                    if (parsed?.length) { setYtCards(parsed); notify(`✓ ${parsed.length} flashcards from video`); }
+                    else notify("Couldn't extract content, try again");
+                } catch (e) { notify("Error: " + e.message); }
+                setYtLoad(false);
+            };
+            return (
+                <div>
+                    <div style={{ fontFamily: "serif", fontSize: 22, color: C.a, marginBottom: 18 }}>Study Files</div>
+                    <div style={{ ...card(), marginBottom: 14 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 8 }}>📁 Upload Files</div>
+                        <div style={{ fontSize: 13, color: C.mu, marginBottom: 12 }}>Upload your school folder or individual files. Tip: name your folders after your courses (e.g. COSC101/, MATH201/) so the app organises them automatically.</div>
+                        <input ref={folderRef} type="file" style={{ display: "none" }} onChange={e => process(Array.from(e.target.files))} {...{ webkitdirectory: "", multiple: true }} />
+                        <input ref={filesRef} type="file" style={{ display: "none" }} multiple onChange={e => process(Array.from(e.target.files))} accept=".txt,.md,.pdf,.csv,.json,.html,.py,.js" />
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button onClick={() => folderRef.current?.click()} style={btn()} disabled={loading}>{loading ? "⏳ Reading..." : "📂 Choose Folder"}</button>
+                            <button onClick={() => filesRef.current?.click()} style={btn("s")} disabled={loading}>+ Individual Files</button>
+                        </div>
+                    </div>
+                    <div style={{ ...card(), marginBottom: 14 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 8 }}>▶ YouTube → Flashcards</div>
+                        <input value={ytUrl} onChange={e => setYtUrl(e.target.value)} placeholder="Paste YouTube link..." style={{ ...inp({ marginBottom: 10 }) }} />
+                        <button onClick={handleYT} style={btn()} disabled={ytLoad || !ytUrl.trim()}>{ytLoad ? "⏳ Searching..." : "Generate Cards"}</button>
+                        {ytCards && <div style={{ marginTop: 10, fontSize: 13, color: C.gr }}>✓ {ytCards.length} cards ready — go to Flashcards to review them</div>}
+                    </div>
+                    {courses.length > 0 ? (
+                        <div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                <div style={{ fontFamily: "serif", fontSize: 16 }}>Library — {files.length} files</div>
+                                <button onClick={() => { if (confirm("Remove all files?")) setFiles([]); }} style={{ ...btn("d"), padding: "5px 12px", fontSize: 12 }}>Clear</button>
+                            </div>
+                            {courses.map(c => (
+                                <div key={c.name} style={{ ...card(), marginBottom: 10 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                        <div style={{ color: C.a, fontWeight: 700, fontSize: 15 }}>📚 {c.name}</div>
+                                        <span style={{ background: C.aD, color: C.a, borderRadius: 10, padding: "2px 10px", fontSize: 11 }}>{c.files.length}</span>
+                                    </div>
+                                    {c.files.map(f => (
+                                        <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: `1px solid ${C.b}`, fontSize: 13 }}>
+                                            <span style={{ color: C.mu }}>{f.b64 ? "📄" : "📝"}</span>
+                                            <span style={{ flex: 1, color: C.tx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path.split("/").slice(1).join("/") || f.name}</span>
+                                            <span style={{ color: C.mu, fontSize: 11, flexShrink: 0 }}>{(f.size / 1024).toFixed(0)}KB</span>
+                                            <button onClick={() => setFiles(p => p.filter(x => x.id !== f.id))} style={{ background: "none", border: "none", color: C.re, cursor: "pointer", fontSize: 18, padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div style={{ ...card(), textAlign: "center", padding: 48 }}>
+                            <div style={{ fontSize: 44, marginBottom: 12 }}>📂</div>
+                            <div style={{ color: C.mu }}>No files yet — upload your course folder to get started</div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── PLAN ──
+        function Plan({ courses, plan, setPlan, examWeeks, notify }) {
+            const [loading, setLoading] = useState(false);
+            const [hpd, setHpd] = useState(2);
+            const [online, setOnline] = useState(false);
+            const gen = async () => {
+                if (!courses.length) { notify("Upload files first!"); return; }
+                setLoading(true);
+                try {
+                    const courseList = courses.map(c => `Course: ${c.name}\nFiles: ${c.files.map(f => f.name).join(", ")}\nContent: ${c.files[0]?.text?.slice(0, 300) || "[PDF file]"}`).join("\n\n");
+                    const prompt = `Student has ${examWeeks} weeks until exam, studies ${hpd} hours/day.
+Course materials:\n${courseList}
+
+Make a reading schedule from today (${new Date().toISOString().split("T")[0]}).
+Return ONLY JSON array (no markdown), max 30 entries:
+[{"date":"YYYY-MM-DD","course":"name","topic":"chapter/topic","pages":"Pages X-Y","duration":"Xh","done":false}]`;
+                    const text = await ai([{ role: "user", content: prompt }], "Return only valid JSON array.", online);
+                    const parsed = parseJSON(text);
+                    if (parsed?.length) { setPlan(parsed.map((p, i) => ({ ...p, id: "p" + i }))); notify(`✓ ${parsed.length}-item plan created!`); }
+                    else notify("Couldn't generate plan, try again");
+                } catch (e) { notify("Error: " + e.message); }
+                setLoading(false);
+            };
+            const toggle = id => setPlan(p => p.map(x => x.id === id ? { ...x, done: !x.done } : x));
+            const pct = plan.length ? Math.round(plan.filter(p => p.done).length / plan.length * 100) : 0;
+            const grouped = {};
+            plan.forEach(p => { const k = new Date(p.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); (grouped[k] = grouped[k] || []).push(p); });
+            return (
+                <div>
+                    <div style={{ fontFamily: "serif", fontSize: 22, color: C.a, marginBottom: 18 }}>Study Plan</div>
+                    <div style={{ ...card(), marginBottom: 16 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 14 }}>⚙ Generate Schedule</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                            <div>
+                                <div style={{ fontSize: 11, color: C.mu, marginBottom: 4 }}>HOURS / DAY</div>
+                                <input type="number" value={hpd} min={0.5} max={12} step={0.5} onChange={e => setHpd(+e.target.value)} style={inp()} />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 11, color: C.mu, marginBottom: 4 }}>WEEKS TO EXAM</div>
+                                <input type="number" value={examWeeks} min={1} max={52} onChange={e => { }} readOnly style={{ ...inp({ color: C.a, fontWeight: 700 }) }} />
+                            </div>
+                        </div>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 12, fontSize: 13, color: C.mu }}>
+                            <input type="checkbox" checked={online} onChange={e => setOnline(e.target.checked)} />
+                            Cross-reference online data (uses more tokens)
+                        </label>
+                        <button onClick={gen} style={{ ...btn(), width: "100%" }} disabled={loading || !courses.length}>
+                            {loading ? "⏳ Generating..." : "✦ Generate My Plan"}
+                        </button>
+                        {!courses.length && <div style={{ fontSize: 12, color: C.re, marginTop: 8 }}>⚠ Upload files first</div>}
+                    </div>
+                    {plan.length > 0 && (
+                        <>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, fontSize: 13, color: C.mu }}>
+                                <span>{plan.filter(p => p.done).length}/{plan.length} sessions · {pct}%</span>
+                                <button onClick={() => { if (confirm("Clear plan?")) setPlan([]); }} style={{ ...btn("d"), padding: "4px 10px", fontSize: 11 }}>Clear</button>
+                            </div>
+                            <div style={{ background: C.s2, borderRadius: 8, height: 7, marginBottom: 18 }}>
+                                <div style={{ background: `linear-gradient(90deg,${C.bl},${C.gr})`, borderRadius: 8, height: 7, width: pct + "%", transition: "width .6s" }} />
+                            </div>
+                            {Object.entries(grouped).map(([date, items]) => (
+                                <div key={date} style={{ marginBottom: 16 }}>
+                                    <div style={{ fontSize: 12, color: C.a, fontWeight: 700, marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
+                                        📅 {date}
+                                        {items.every(i => i.done) && <span style={{ color: C.gr, fontSize: 10, background: "#1a3a2a", padding: "1px 7px", borderRadius: 10 }}>✓ Done</span>}
+                                    </div>
+                                    {items.map(item => (
+                                        <div key={item.id} style={{ ...card({ marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 12, opacity: item.done ? .6 : 1 }) }} onClick={() => toggle(item.id)}>
+                                            <input type="checkbox" checked={item.done} onChange={() => toggle(item.id)} style={{ marginTop: 3, flexShrink: 0 }} />
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 700, textDecoration: item.done ? "line-through" : "none", fontSize: 14 }}>{item.course}</div>
+                                                <div style={{ fontSize: 12, color: C.mu, marginTop: 3 }}>{item.topic}</div>
+                                                <div style={{ fontSize: 12, marginTop: 2 }}><span style={{ color: C.bl }}>{item.pages}</span> · <span style={{ color: C.mu }}>{item.duration}</span></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </>
+                    )}
+                    {!plan.length && !loading && (
+                        <div style={{ ...card(), textAlign: "center", padding: 48 }}>
+                            <div style={{ fontSize: 44, marginBottom: 12 }}>📋</div>
+                            <div style={{ color: C.mu }}>No plan yet — click Generate to create your schedule</div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── CARDS ──
+        function Cards({ cards, setCards, courses, dueCards, notify }) {
+            const [mode, setMode] = useState("home");
+            const [selC, setSelC] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [rIdx, setRIdx] = useState(0);
+            const [showA, setShowA] = useState(false);
+            const [online, setOnline] = useState(false);
+            const [newQ, setNewQ] = useState(""); const [newA, setNewA] = useState(""); const [newC, setNewC] = useState("");
+
+            const queue = [...dueCards].sort((a, b) => (a.due || "") < (b.due || "") ? -1 : 1);
+            const curr = queue[rIdx];
+
+            const genCards = async () => {
+                const course = courses.find(c => c.name === selC) || courses[0];
+                if (!course) { notify("Select a course"); return; }
+                setLoading(true);
+                try {
+                    const fileContent = course.files.slice(0, 2).map(f => f.b64
+                        ? JSON.stringify([{ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.b64 } }, { type: "text", text: `File: ${f.path}` }])
+                        : `File: ${f.path}\n${(f.text || "").slice(0, 3000)}`
+                    ).join("\n\n---\n\n");
+                    const prompt = `Generate 10 comprehensive flashcards from these study materials.\n${fileContent}\n${online ? "Search online for additional context on the topics." : ""}\nReturn ONLY JSON array: [{"q":"question","a":"answer","course":"${course.name}"}]`;
+                    const msgs = course.files[0]?.b64
+                        ? [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: course.files[0].b64 } }, { type: "text", text: prompt }] }]
+                        : [{ role: "user", content: prompt }];
+                    const text = await ai(msgs, "Return only valid JSON array.", online);
+                    const parsed = parseJSON(text);
+                    if (parsed?.length) {
+                        setCards(p => [...p, ...parsed.map((c, i) => ({ ...c, id: "c" + Date.now() + i, ef: 2.5, reps: 0, interval: 1, due: null }))]);
+                        notify(`✓ Added ${parsed.length} cards for ${course.name}`); setMode("home");
+                    } else notify("Couldn't parse cards, try again");
+                } catch (e) { notify("Error: " + e.message); }
+                setLoading(false);
+            };
+
+            const rate = q => {
+                setCards(p => p.map(c => c.id === curr.id ? sm2(c, q) : c));
+                setShowA(false);
+                if (rIdx + 1 >= queue.length) { setMode("home"); notify("✓ Review done!"); }
+                else setRIdx(i => i + 1);
+            };
+
+            const addCustom = () => {
+                if (!newQ.trim() || !newA.trim()) return;
+                setCards(p => [...p, { id: "cc" + Date.now(), q: newQ, a: newA, course: newC || "Custom", ef: 2.5, reps: 0, interval: 1, due: null }]);
+                setNewQ(""); setNewA(""); setNewC(""); notify("✓ Card added");
+            };
+
+            if (mode === "review") {
+                if (!queue.length) return (
+                    <div style={{ textAlign: "center", paddingTop: 80 }}>
+                        <div style={{ fontSize: 56, marginBottom: 12 }}>🎉</div>
+                        <div style={{ fontFamily: "serif", fontSize: 22, color: C.a }}>All caught up!</div>
+                        <div style={{ color: C.mu, margin: "8px 0 20px" }}>No more cards due right now.</div>
+                        <button onClick={() => setMode("home")} style={btn()}>← Back</button>
+                    </div>
+                );
+                return (
+                    <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, fontSize: 13, color: C.mu }}>
+                            <button onClick={() => { setMode("home"); setRIdx(0); }} style={{ background: "none", border: "none", color: C.mu, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>← Back</button>
+                            <span>{rIdx + 1} / {queue.length}</span>
+                            <span style={{ background: C.aD, color: C.a, padding: "2px 10px", borderRadius: 10, fontSize: 11 }}>{curr?.course}</span>
+                        </div>
+                        <div style={{ background: C.s2, borderRadius: 8, height: 5, marginBottom: 20 }}>
+                            <div style={{ background: C.a, height: 5, borderRadius: 8, width: (rIdx / queue.length * 100) + "%", transition: "width .4s" }} />
+                        </div>
+                        <div onClick={() => setShowA(true)} style={{ ...card({ minHeight: 180, display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "center", cursor: showA ? "default" : "pointer", borderColor: showA ? C.a : C.b, transition: "border-color .3s", marginBottom: 12 }) }}>
+                            <div style={{ fontSize: 10, color: C.a, letterSpacing: "0.1em", marginBottom: 12 }}>QUESTION</div>
+                            <div style={{ fontFamily: "serif", fontSize: 18, lineHeight: 1.7 }}>{curr?.q}</div>
+                            {!showA && <div style={{ fontSize: 12, color: C.mu, marginTop: 16 }}>Tap to reveal ↓</div>}
+                        </div>
+                        {showA && (
+                            <>
+                                <div style={{ ...card({ background: C.s2, textAlign: "center", borderColor: C.gr, marginBottom: 16 }) }}>
+                                    <div style={{ fontSize: 10, color: C.gr, letterSpacing: "0.1em", marginBottom: 12 }}>ANSWER</div>
+                                    <div style={{ fontFamily: "serif", fontSize: 16, lineHeight: 1.75 }}>{curr?.a}</div>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
+                                    {[["Again", 0, C.re, "< 1 day"], ["Hard", 1, "#f97316", "~1 day"], ["Good", 3, C.bl, "~" + Math.round((curr?.interval || 1) * 2.5) + "d"], ["Easy", 5, C.gr, "~" + Math.round((curr?.interval || 1) * 3) + "d"]].map(([l, q, col, sub]) => (
+                                        <button key={l} onClick={() => rate(q)} style={{ ...btn("s"), borderTop: `3px solid ${col}`, padding: "12px 4px", textAlign: "center", borderRadius: 8 }}>
+                                            <div style={{ color: col, fontWeight: 700, fontSize: 15 }}>{l}</div>
+                                            <div style={{ fontSize: 10, color: C.mu, marginTop: 2 }}>{sub}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                );
+            }
+
+            if (mode === "gen") return (
+                <div>
+                    <button onClick={() => setMode("home")} style={{ background: "none", border: "none", color: C.mu, cursor: "pointer", fontFamily: "inherit", marginBottom: 14, fontSize: 13 }}>← Back</button>
+                    <div style={card()}>
+                        <div style={{ fontFamily: "serif", fontSize: 18, marginBottom: 16 }}>Generate Flashcards</div>
+                        <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 11, color: C.mu, marginBottom: 4 }}>COURSE</div>
+                            <select value={selC} onChange={e => setSelC(e.target.value)} style={inp()}>
+                                <option value="">Select course...</option>
+                                {courses.map(c => <option key={c.name} value={c.name}>{c.name} ({c.files.length} files)</option>)}
+                            </select>
+                        </div>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 16, fontSize: 13, color: C.mu }}>
+                            <input type="checkbox" checked={online} onChange={e => setOnline(e.target.checked)} />
+                            Search online for extra info
+                        </label>
+                        <button onClick={genCards} style={{ ...btn(), width: "100%" }} disabled={loading || !courses.length}>
+                            {loading ? "⏳ Generating 10 cards..." : "✦ Generate Flashcards"}
+                        </button>
+                        {!courses.length && <div style={{ fontSize: 12, color: C.re, marginTop: 8 }}>Upload files first</div>}
+                    </div>
+                </div>
+            );
+
+            const byCourse = {};
+            cards.forEach(c => (byCourse[c.course] = byCourse[c.course] || []).push(c));
+            return (
+                <div>
+                    <div style={{ fontFamily: "serif", fontSize: 22, color: C.a, marginBottom: 18 }}>Flashcards</div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                        <button onClick={() => { setRIdx(0); setShowA(false); setMode("review"); }} style={btn()} disabled={!dueCards.length}>
+                            ▶ Review {dueCards.length} Due
+                        </button>
+                        <button onClick={() => setMode("gen")} style={btn("s")}>✦ Generate from Files</button>
+                    </div>
+                    <div style={{ ...card(), marginBottom: 16 }}>
+                        <div style={{ fontFamily: "serif", fontSize: 14, marginBottom: 12, color: C.a }}>+ Add Card Manually</div>
+                        <input value={newQ} onChange={e => setNewQ(e.target.value)} placeholder="Question..." style={{ ...inp({ marginBottom: 8 }) }} />
+                        <input value={newA} onChange={e => setNewA(e.target.value)} placeholder="Answer..." style={{ ...inp({ marginBottom: 8 }) }} />
+                        <div style={{ display: "flex", gap: 8 }}>
+                            <input value={newC} onChange={e => setNewC(e.target.value)} placeholder="Course name" style={inp()} />
+                            <button onClick={addCustom} style={{ ...btn("s"), flexShrink: 0 }} disabled={!newQ || !newA}>Add</button>
+                        </div>
+                    </div>
+                    {cards.length === 0 ? (
+                        <div style={{ ...card(), textAlign: "center", padding: 48 }}>
+                            <div style={{ fontSize: 44, marginBottom: 12 }}>◇</div>
+                            <div style={{ color: C.mu }}>No flashcards yet</div>
+                        </div>
+                    ) : Object.entries(byCourse).map(([course, cds]) => (
+                        <div key={course} style={{ ...card({ marginBottom: 12 }) }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                <div style={{ color: C.a, fontWeight: 700, fontFamily: "serif" }}>{course}</div>
+                                <div style={{ fontSize: 12, color: C.mu }}>
+                                    <span style={{ color: C.re }}>{cds.filter(c => !c.due || new Date(c.due) <= new Date()).length} due</span> · {cds.length} total
+                                </div>
+                            </div>
+                            {cds.slice(0, 2).map(c => (
+                                <div key={c.id} style={{ background: C.s2, borderRadius: 8, padding: "10px 12px", marginBottom: 7, fontSize: 13 }}>
+                                    <div style={{ color: C.a, marginBottom: 3, fontWeight: 600 }}>Q: {c.q}</div>
+                                    <div style={{ color: C.mu }}>A: {(c.a || "").slice(0, 80)}{c.a?.length > 80 ? "..." : ""}</div>
+                                </div>
+                            ))}
+                            {cds.length > 2 && <div style={{ fontSize: 12, color: C.mu, marginTop: 4 }}>+ {cds.length - 2} more cards</div>}
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        // ── QUIZ ──
+        function Quiz({ courses, qHist, setQHist, notify }) {
+            const [quiz, setQuiz] = useState(null);
+            const [answers, setAnswers] = useState({});
+            const [submitted, setSubmitted] = useState(false);
+            const [selC, setSelC] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [online, setOnline] = useState(false);
+            const gen = async () => {
+                const course = courses.find(c => c.name === selC) || courses[0];
+                if (!course) { notify("Select a course"); return; }
+                setLoading(true); setQuiz(null); setAnswers({}); setSubmitted(false);
+                try {
+                    const fileContent = course.files.slice(0, 2).map(f => f.text ? (f.text || "").slice(0, 3000) : "[PDF content]").join("\n---\n");
+                    const prompt = `Create 6 multiple-choice questions from:\n${fileContent}\n${online ? "Search online for current info on these topics." : ""}\nReturn ONLY JSON array: [{"q":"question","options":["A","B","C","D"],"answer":0,"explanation":"why"}]`;
+                    const text = await ai([{ role: "user", content: prompt }], "Return only valid JSON array.", online);
+                    const parsed = parseJSON(text);
+                    if (parsed?.length) { setQuiz({ questions: parsed, course: course.name }); notify("✓ Quiz ready!"); }
+                    else notify("Couldn't generate quiz, try again");
+                } catch (e) { notify("Error: " + e.message); }
+                setLoading(false);
+            };
+            const submit = () => {
+                setSubmitted(true);
+                const correct = quiz.questions.filter((q, i) => answers[i] === q.answer).length;
+                const pct = Math.round(correct / quiz.questions.length * 100);
+                setQHist(h => [...h, { course: quiz.course, correct, total: quiz.questions.length, pct, date: new Date().toISOString() }]);
+            };
+            const score = quiz ? quiz.questions.filter((q, i) => answers[i] === q.answer).length : 0;
+            const answered = Object.keys(answers).length;
+            return (
+                <div>
+                    <div style={{ fontFamily: "serif", fontSize: 22, color: C.a, marginBottom: 18 }}>Quiz Mode</div>
+                    {!quiz && (
+                        <div style={{ ...card({ marginBottom: 20 }) }}>
+                            <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 14 }}>Generate a Quiz</div>
+                            <div style={{ marginBottom: 12 }}>
+                                <div style={{ fontSize: 11, color: C.mu, marginBottom: 4 }}>COURSE</div>
+                                <select value={selC} onChange={e => setSelC(e.target.value)} style={inp()}>
+                                    <option value="">Select course...</option>
+                                    {courses.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 14, fontSize: 13, color: C.mu }}>
+                                <input type="checkbox" checked={online} onChange={e => setOnline(e.target.checked)} />
+                                Include online info
+                            </label>
+                            <button onClick={gen} style={{ ...btn(), width: "100%" }} disabled={loading || !courses.length}>
+                                {loading ? "⏳ Generating..." : "✦ Start Quiz (6 questions)"}
+                            </button>
+                            {!courses.length && <div style={{ fontSize: 12, color: C.re, marginTop: 8 }}>Upload files first</div>}
+                        </div>
+                    )}
+                    {quiz && !submitted && (
+                        <div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, fontSize: 13, color: C.mu }}>
+                                <span style={{ color: C.a, fontFamily: "serif" }}>{quiz.course}</span>
+                                <span>{answered}/{quiz.questions.length} answered</span>
+                            </div>
+                            {quiz.questions.map((q, qi) => (
+                                <div key={qi} style={{ ...card({ marginBottom: 12 }) }}>
+                                    <div style={{ fontWeight: 700, marginBottom: 12, fontFamily: "serif", fontSize: 15 }}>{qi + 1}. {q.q}</div>
+                                    {q.options.map((opt, oi) => (
+                                        <button key={oi} onClick={() => setAnswers(a => ({ ...a, [qi]: oi }))} style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", marginBottom: 7, background: answers[qi] === oi ? C.aD : C.s2, border: `1px solid ${answers[qi] === oi ? C.a : C.b}`, borderRadius: 8, color: C.tx, fontSize: 14, cursor: "pointer" }}>
+                                            <span style={{ color: C.a, fontWeight: 700, marginRight: 8 }}>{["A", "B", "C", "D"][oi]}.</span>{opt}
+                                        </button>
+                                    ))}
+                                </div>
+                            ))}
+                            <div style={{ display: "flex", gap: 10 }}>
+                                <button onClick={submit} style={{ ...btn(), flex: 1 }} disabled={answered < quiz.questions.length}>Submit ({answered}/{quiz.questions.length})</button>
+                                <button onClick={() => setQuiz(null)} style={btn("s")}>Cancel</button>
+                            </div>
+                        </div>
+                    )}
+                    {quiz && submitted && (
+                        <div>
+                            <div style={{ ...card({ textAlign: "center", marginBottom: 20, background: score / quiz.questions.length >= .7 ? "#0d2a1a" : "#2a0d0d", borderColor: score / quiz.questions.length >= .7 ? C.gr : C.re }) }}>
+                                <div style={{ fontFamily: "serif", fontSize: 52, fontWeight: 700, color: score / quiz.questions.length >= .7 ? C.gr : C.re }}>{Math.round(score / quiz.questions.length * 100)}%</div>
+                                <div style={{ color: C.mu, marginTop: 4 }}>{score}/{quiz.questions.length} correct · {quiz.course}</div>
+                                <div style={{ marginTop: 6, fontSize: 14, color: score / quiz.questions.length >= .7 ? C.gr : C.re }}>{score / quiz.questions.length >= .9 ? "🏆 Excellent!" : score / quiz.questions.length >= .7 ? "✓ Good work!" : "📖 Review and try again"}</div>
+                                <button onClick={() => { setQuiz(null); setAnswers({}); setSubmitted(false); }} style={{ ...btn(), marginTop: 14 }}>Try Another</button>
+                            </div>
+                            {quiz.questions.map((q, qi) => {
+                                const ok = answers[qi] === q.answer;
+                                return (
+                                    <div key={qi} style={{ ...card({ marginBottom: 10, borderLeft: `3px solid ${ok ? C.gr : C.re}` }) }}>
+                                        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>{qi + 1}. {q.q}</div>
+                                        {q.options.map((opt, oi) => (
+                                            <div key={oi} style={{ padding: "8px 10px", marginBottom: 5, borderRadius: 6, fontSize: 13, background: oi === q.answer ? "#0d2a1a" : oi === answers[qi] && !ok ? "#2a0d0d" : C.s2, color: oi === q.answer ? C.gr : oi === answers[qi] && !ok ? C.re : C.tx, display: "flex", gap: 8 }}>
+                                                <span style={{ width: 16 }}>{oi === q.answer ? "✓" : oi === answers[qi] && !ok ? "✗" : ""}</span>
+                                                <span style={{ color: C.a, fontWeight: 700 }}>{["A", "B", "C", "D"][oi]}.</span>{opt}
+                                            </div>
+                                        ))}
+                                        {q.explanation && <div style={{ fontSize: 12, color: C.mu, marginTop: 6, padding: "7px 10px", background: C.s2, borderRadius: 6 }}>💡 {q.explanation}</div>}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                    {!quiz && qHist.length > 0 && (
+                        <div>
+                            <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 12 }}>Recent Quizzes</div>
+                            {[...qHist].reverse().slice(0, 5).map((h, i) => (
+                                <div key={i} style={{ ...card({ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }) }}>
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: 14 }}>{h.course}</div>
+                                        <div style={{ fontSize: 12, color: C.mu }}>{new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {h.correct}/{h.total}</div>
+                                    </div>
+                                    <div style={{ fontFamily: "serif", fontSize: 28, color: h.pct >= 70 ? C.gr : C.re, fontWeight: 700 }}>{h.pct}%</div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── PROGRESS ──
+        function Prog({ cards, qHist, plan, files }) {
+            const total = cards.length;
+            const mastered = cards.filter(c => (c.reps || 0) >= 5).length;
+            const learning = cards.filter(c => (c.reps || 0) > 0 && (c.reps || 0) < 5).length;
+            const planDone = plan.filter(p => p.done).length;
+            const avgQ = qHist.length ? Math.round(qHist.reduce((s, q) => s + q.pct, 0) / qHist.length) : 0;
+            const byCourse = {};
+            cards.forEach(c => { if (!byCourse[c.course]) byCourse[c.course] = { total: 0, mastered: 0 }; byCourse[c.course].total++; if ((c.reps || 0) >= 5) byCourse[c.course].mastered++; });
+            return (
+                <div>
+                    <div style={{ fontFamily: "serif", fontSize: 22, color: C.a, marginBottom: 18 }}>Progress</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                        {[["Mastered", mastered, C.gr, "★"], ["Learning", learning, C.bl, "◇"], ["Done", planDone, C.a, "📖"], ["Quiz Avg", avgQ + "%", avgQ >= 70 ? C.gr : C.re, "◉"], ["Files", files.length, C.bl, "⊞"], ["Total Cards", total, C.mu, "▫"]].map(([l, v, col, icon]) => (
+                            <div key={l} style={{ ...card({ borderTop: `2px solid ${col}`, padding: 14 }) }}>
+                                <div style={{ fontSize: 20 }}>{icon}</div>
+                                <div style={{ fontFamily: "serif", fontSize: 24, color: col, fontWeight: 700, marginTop: 4 }}>{v}</div>
+                                <div style={{ fontSize: 12, color: C.mu, marginTop: 2 }}>{l}</div>
+                            </div>
+                        ))}
+                    </div>
+                    {total > 0 && (
+                        <div style={{ ...card({ marginBottom: 14 }) }}>
+                            <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 12 }}>Card Mastery</div>
+                            <div style={{ display: "flex", gap: 3, height: 14, borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+                                <div style={{ width: (mastered / total * 100) + "%", background: C.gr }} />
+                                <div style={{ width: (learning / total * 100) + "%", background: C.bl }} />
+                                <div style={{ flex: 1, background: C.s2 }} />
+                            </div>
+                            <div style={{ display: "flex", gap: 14, fontSize: 12 }}>
+                                {[["Mastered", mastered, C.gr], ["Learning", learning, C.bl], ["New", total - mastered - learning, C.mu]].map(([l, n, col]) => (
+                                    <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                        <div style={{ width: 9, height: 9, borderRadius: 2, background: col }} />
+                                        <span style={{ color: C.mu }}>{l}: </span><span style={{ color: col, fontWeight: 700 }}>{n}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {plan.length > 0 && (
+                        <div style={{ ...card({ marginBottom: 14 }) }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14 }}>
+                                <span style={{ fontFamily: "serif" }}>Reading Progress</span>
+                                <span style={{ color: C.mu }}>{planDone}/{plan.length}</span>
+                            </div>
+                            <div style={{ background: C.s2, borderRadius: 8, height: 10 }}>
+                                <div style={{ background: `linear-gradient(90deg,${C.a},${C.gr})`, borderRadius: 8, height: 10, width: (planDone / plan.length * 100) + "%", transition: "width .6s" }} />
+                            </div>
+                        </div>
+                    )}
+                    {Object.keys(byCourse).length > 0 && (
+                        <div style={card()}>
+                            <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 14 }}>Per-Course Mastery</div>
+                            {Object.entries(byCourse).map(([course, d]) => (
+                                <div key={course} style={{ marginBottom: 12 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 13 }}>
+                                        <span>{course}</span><span style={{ color: C.mu }}>{d.mastered}/{d.total}</span>
+                                    </div>
+                                    <div style={{ background: C.s2, borderRadius: 4, height: 7 }}>
+                                        <div style={{ background: C.gr, borderRadius: 4, height: 7, width: (d.mastered / d.total * 100) + "%", transition: "width .6s" }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {qHist.length > 0 && (
+                        <div style={{ ...card({ marginTop: 14 }) }}>
+                            <div style={{ fontFamily: "serif", fontSize: 16, marginBottom: 12 }}>Quiz History</div>
+                            {[...qHist].reverse().slice(0, 6).map((h, i) => (
+                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: C.mu, width: 60, flexShrink: 0 }}>{new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                                    <span style={{ fontSize: 12, color: C.tx, width: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>{h.course}</span>
+                                    <div style={{ flex: 1, background: C.s2, borderRadius: 4, height: 8 }}>
+                                        <div style={{ background: h.pct >= 70 ? C.gr : C.re, borderRadius: 4, height: 8, width: h.pct + "%" }} />
+                                    </div>
+                                    <span style={{ fontSize: 12, color: h.pct >= 70 ? C.gr : C.re, width: 36, textAlign: "right", fontWeight: 700, flexShrink: 0 }}>{h.pct}%</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+
+</html>

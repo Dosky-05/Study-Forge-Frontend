@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyForge Logo Preview</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0c0c1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        .container {
+            text-align: center;
+        }
+        .description {
+            color: #7878a0;
+            margin-top: 20px;
+            font-size: 14px;
+            max-width: 400px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg width="400" height="400" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <linearGradient id="forgeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+                    <stop offset="60%" style="stop-color:#a855f7;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1" />
+                </linearGradient>
+                <filter id="glow">
+                    <feGaussianBlur stdDeviation="3.5" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+            </defs>
+
+            <!-- Outer Forge Hexagon -->
+            <path d="M100 20 L170 60 L170 140 L100 180 L30 140 L30 60 Z" fill="none" stroke="url(#forgeGradient)"
+                stroke-width="1.5" stroke-dasharray="2 4" opacity="0.3" />
+
+            <!-- The SF Monogram -->
+            <g filter="url(#glow)">
+                <!-- S - Fluid Path -->
+                <path d="M65 75 C 65 60, 100 60, 100 85 C 100 110, 65 110, 65 135 C 65 160, 100 160, 100 150" fill="none"
+                    stroke="url(#forgeGradient)" stroke-width="10" stroke-linecap="round" />
+
+                <!-- F - Structural Path -->
+                <path d="M115 70 L115 160 M115 75 L145 75 M115 110 L135 110" fill="none" stroke="url(#forgeGradient)"
+                    stroke-width="10" stroke-linecap="round" />
+
+                <!-- The Forge Spark -->
+                <circle cx="140" cy="55" r="4" fill="#f59e0b">
+                    <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+                </circle>
+            </g>
+
+            <text x="100" y="195" text-anchor="middle" font-family="'Segoe UI', sans-serif" font-weight="900" font-size="20"
+                fill="url(#forgeGradient)" style="letter-spacing: 2px;">STUDYFORGE</text>
+        </svg>
+        <div class="description">
+            The Digital Anvil: A minimalist "SF" monogram blending fluid intelligence (S) with structural strength (F).
+        </div>
+    </div>
+</body>
+</html>
