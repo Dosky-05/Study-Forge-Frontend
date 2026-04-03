@@ -12,7 +12,7 @@ import Quiz from './pages/Quiz';
 import Prog from './pages/Prog';
 
 export default function App() {
-    const [isLoggedIn, setIsLoggedIn] = useState(() => !!LS.get('sf_apikey', ''));
+    const [isLoggedIn, setIsLoggedIn] = useState(() => !!LS.get('sf_user', null));
     const [pg, setPg] = useState('dash');
     const [files, setFiles] = useState(() => LS.get('sf_files', []));
     const [plan, setPlan] = useState(() => LS.get('sf_plan', []));
@@ -44,7 +44,7 @@ export default function App() {
     }, [theme]);
     useEffect(() => LS.set('sf_profile', profile), [profile]);
 
-    if (!isLoggedIn) return <ApiKeyScreen onSave={() => setIsLoggedIn(true)} />;
+    if (!isLoggedIn) return <ApiKeyScreen onLogin={(user) => { LS.set('sf_user', user); setIsLoggedIn(true); }} />;
 
     // Derive courses from files
     const courseMap = {};
@@ -70,10 +70,10 @@ export default function App() {
         <div style={{ display: 'flex', height: '100vh', background: C.bg, color: C.tx }}>
             <Toast msg={toast} />
             {showProfile && (
-                <ProfileModal 
-                    profile={profile} 
-                    onSave={(np) => { setProfile(np); setShowProfile(false); notify('Profile updated!'); }} 
-                    onClose={() => setShowProfile(false)} 
+                <ProfileModal
+                    profile={profile}
+                    onSave={(np) => { setProfile(np); setShowProfile(false); notify('Profile updated!'); }}
+                    onClose={() => setShowProfile(false)}
                 />
             )}
 
@@ -125,28 +125,28 @@ export default function App() {
                 }}>
                     {isMobile && <div style={{ fontSize: 20, color: C.a, fontWeight: 700 }}>StudyForge</div>}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <button style={{ 
-                            background: 'none', border: 'none', color: C.mu, cursor: 'pointer', 
+                        <button style={{
+                            background: 'none', border: 'none', color: C.mu, cursor: 'pointer',
                             fontSize: 18, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             padding: 4, borderRadius: 8, transition: 'background 0.2s'
                         }}
-                        onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                        onMouseOut={e => e.currentTarget.style.background = 'none'}
+                            onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                            onMouseOut={e => e.currentTarget.style.background = 'none'}
                         >
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                                 <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                             </svg>
                             {/* Notification Dot */}
-                            <div style={{ 
-                                position: 'absolute', top: 4, right: 4, width: 8, height: 8, 
+                            <div style={{
+                                position: 'absolute', top: 4, right: 4, width: 8, height: 8,
                                 background: C.re, borderRadius: '50%', border: `2px solid ${C.bg}`
                             }} />
                         </button>
-                        <button 
+                        <button
                             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-                            style={{ 
-                                background: 'none', border: 'none', color: C.a, cursor: 'pointer', 
+                            style={{
+                                background: 'none', border: 'none', color: C.a, cursor: 'pointer',
                                 fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 padding: 6, borderRadius: 8, transition: 'all 0.2s'
                             }}
@@ -172,13 +172,13 @@ export default function App() {
                             )}
                         </button>
                         <button
-                            onClick={() => { if (confirm('Log out and change API key?')) { LS.set('sf_apikey', ''); setIsLoggedIn(false); } }}
-                            style={{ 
-                                background: 'none', border: 'none', color: C.mu, cursor: 'pointer', 
+                            onClick={() => { if (confirm('Are you sure you want to log out?')) { LS.set('sf_user', null); setIsLoggedIn(false); } }}
+                            style={{
+                                background: 'none', border: 'none', color: C.mu, cursor: 'pointer',
                                 fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 padding: 6, borderRadius: 8, transition: 'all 0.2s'
                             }}
-                            title="Logout / Change API Key"
+                            title="Logout"
                             onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
                             onMouseOut={e => e.currentTarget.style.background = 'none'}
                         >
@@ -188,11 +188,11 @@ export default function App() {
                                 <line x1="21" y1="12" x2="9" y2="12"></line>
                             </svg>
                         </button>
-                        <div 
+                        <div
                             onClick={() => setShowProfile(true)}
-                            style={{ 
-                                width: 34, height: 34, borderRadius: 17, 
-                                border: `2px solid ${C.s2}`, 
+                            style={{
+                                width: 34, height: 34, borderRadius: 17,
+                                border: `2px solid ${C.s2}`,
                                 boxShadow: `0 0 15px rgba(99,91,255,0.2)`,
                                 padding: 2, background: C.bg,
                                 cursor: 'pointer', transition: 'transform 0.2s'
@@ -202,9 +202,9 @@ export default function App() {
                             title="My Profile"
                         >
                             <div style={{ width: '100%', height: '100%', borderRadius: 15, background: C.s2, overflow: 'hidden' }}>
-                                <img 
-                                    src={profile.avatar?.startsWith('data:') ? profile.avatar : `https://api.dicebear.com/7.x/micah/svg?seed=${profile.avatar || 'StudyForge'}&backgroundColor=transparent`} 
-                                    alt="avatar" 
+                                <img
+                                    src={profile.avatar?.startsWith('data:') ? profile.avatar : `https://api.dicebear.com/7.x/micah/svg?seed=${profile.avatar || 'StudyForge'}&backgroundColor=transparent`}
+                                    alt="avatar"
                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                 />
                             </div>

@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-import { LS } from '../utils/storage';
-import { ai } from '../utils/ai';
 
 const S = {
     wrap: {
@@ -75,7 +73,7 @@ const S = {
     },
     fieldWrap: {
         width: '100%',
-        marginBottom: 20,
+        marginBottom: 16,
     },
     label: {
         color: '#5a607a',
@@ -83,29 +81,41 @@ const S = {
         fontWeight: 700,
         letterSpacing: '0.1em',
         textTransform: 'uppercase',
-        marginBottom: 10,
+        marginBottom: 8,
         display: 'block',
     },
     inputRow: {
         position: 'relative',
         width: '100%',
     },
-    input: {
+    input: focused => ({
         width: '100%',
         background: '#1a1d35',
-        border: '1px solid #2d325a',
+        border: focused ? '1px solid #4f5ef7' : '1px solid #2d325a',
         borderRadius: 14,
         padding: '14px 44px 14px 16px',
         color: '#fff',
         fontSize: 15,
         outline: 'none',
         fontFamily: 'inherit',
+        boxShadow: focused ? '0 0 0 4px rgba(79, 94, 247, 0.1)' : 'none',
         transition: 'border-color 0.2s, box-shadow 0.2s',
-        '&:focus': {
-            borderColor: '#4f5ef7',
-            boxShadow: '0 0 0 4px rgba(79, 94, 247, 0.1)',
-        }
-    },
+        boxSizing: 'border-box',
+    }),
+    inputPlain: focused => ({
+        width: '100%',
+        background: '#1a1d35',
+        border: focused ? '1px solid #4f5ef7' : '1px solid #2d325a',
+        borderRadius: 14,
+        padding: '14px 16px',
+        color: '#fff',
+        fontSize: 15,
+        outline: 'none',
+        fontFamily: 'inherit',
+        boxShadow: focused ? '0 0 0 4px rgba(79, 94, 247, 0.1)' : 'none',
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+        boxSizing: 'border-box',
+    }),
     eyeBtn: {
         position: 'absolute',
         right: 14,
@@ -120,7 +130,7 @@ const S = {
         display: 'flex',
         alignItems: 'center',
     },
-    submitBtn: {
+    submitBtn: (disabled) => ({
         width: '100%',
         background: 'linear-gradient(135deg, #4f5ef7, #6c4fff)',
         color: '#fff',
@@ -129,7 +139,7 @@ const S = {
         padding: '16px 24px',
         fontSize: 16,
         fontWeight: 700,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         fontFamily: 'inherit',
         marginTop: 8,
         transition: 'all 0.2s',
@@ -138,7 +148,8 @@ const S = {
         justifyContent: 'center',
         gap: 10,
         boxShadow: '0 4px 15px rgba(79, 94, 247, 0.3)',
-    },
+        opacity: disabled ? 0.6 : 1,
+    }),
     err: {
         color: '#f87171',
         fontSize: 12,
@@ -148,34 +159,48 @@ const S = {
         borderRadius: 8,
         border: '1px solid rgba(248, 113, 113, 0.2)',
         width: '100%',
+        boxSizing: 'border-box',
     },
-    regInfo: {
+    success: {
+        color: '#4ade80',
+        fontSize: 12,
+        marginTop: 10,
+        background: 'rgba(74, 222, 128, 0.1)',
+        padding: '8px 12px',
+        borderRadius: 8,
+        border: '1px solid rgba(74, 222, 128, 0.2)',
         width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 20,
+        boxSizing: 'border-box',
     },
-    infoText: {
-        color: '#c8ceea',
-        fontSize: 14,
-        lineHeight: 1.6,
-        textAlign: 'center',
-    },
-    extLink: {
+    forgotBtn: {
+        background: 'none',
+        border: 'none',
+        color: '#4f5ef7',
+        fontSize: 12,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        padding: 0,
+        marginTop: 8,
+        alignSelf: 'flex-end',
+        display: 'block',
         width: '100%',
-        background: '#1e2240',
-        color: '#fff',
-        textDecoration: 'none',
-        borderRadius: 14,
-        padding: '14px 20px',
-        fontSize: 14,
-        fontWeight: 600,
+        textAlign: 'right',
+    },
+    divider: {
+        width: '100%',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        transition: 'background 0.2s',
-        border: '1px solid #2d325a',
+        gap: 12,
+        margin: '8px 0',
+    },
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        background: '#2d325a',
+    },
+    dividerText: {
+        color: '#5a607a',
+        fontSize: 12,
     },
     brand: {
         marginTop: 40,
@@ -183,34 +208,93 @@ const S = {
         alignItems: 'center',
         gap: 8,
         opacity: 0.6,
-    }
+    },
 };
 
-export default function ApiKeyScreen({ onSave }) {
-    const [mode, setMode] = useState('login'); // 'login' | 'register'
-    const [key, setKey] = useState('');
-    const [show, setShow] = useState(false);
-    const [err, setErr] = useState('');
-    const [testing, setTesting] = useState(false);
+function FocusInput({ type, placeholder, value, onChange, onKeyDown, autoComplete, spellCheck, style, children }) {
+    const [focused, setFocused] = useState(false);
+    const hasEye = !!children;
+    return (
+        <div style={S.inputRow}>
+            <input
+                type={type}
+                placeholder={placeholder}
+                value={value}
+                onChange={onChange}
+                onKeyDown={onKeyDown}
+                autoComplete={autoComplete}
+                spellCheck={spellCheck}
+                style={hasEye ? S.input(focused) : S.inputPlain(focused)}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+            />
+            {children}
+        </div>
+    );
+}
 
-    const test = async () => {
-        if (!key.trim()) { setErr('Please enter your API key to continue'); return; }
-        if (!key.startsWith('sk-ant-')) { setErr('Invalid format. Key should start with sk-ant-'); return; }
-        
-        setTesting(true); setErr('');
-        try {
-            LS.set('sf_apikey', key.trim());
-            // Test with a lightweight call
-            await ai([{ role: 'user', content: 'Connection test. Reply exactly with: READY' }], '');
-            onSave();
-        } catch (e) {
-            setErr("Authentication failed: " + (e.message.includes('401') ? 'Invalid API Key' : e.message));
-            LS.set('sf_apikey', '');
-        }
-        setTesting(false);
+export default function AuthScreen({ onLogin }) {
+    const [mode, setMode] = useState('login');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [name, setName] = useState('');
+    const [showPass, setShowPass] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [err, setErr] = useState('');
+    const [successMsg, setSuccessMsg] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const reset = () => {
+        setErr(''); setSuccessMsg('');
+        setEmail(''); setPassword('');
+        setConfirmPassword(''); setName('');
+        setShowPass(false); setShowConfirm(false);
     };
 
-    const handleKey = e => { if (e.key === 'Enter') test(); };
+    const switchMode = (m) => { reset(); setMode(m); };
+
+    const validateEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+    const handleLogin = async () => {
+        setErr(''); setSuccessMsg('');
+        if (!email.trim() || !password.trim()) { setErr('Please fill in all fields.'); return; }
+        if (!validateEmail(email)) { setErr('Please enter a valid email address.'); return; }
+        setLoading(true);
+        try {
+            // Replace this block with your real auth logic e.g. Firebase, Supabase, etc.
+            await new Promise(r => setTimeout(r, 1000));
+            onLogin({ email });
+        } catch (e) {
+            setErr(e.message || 'Login failed. Please try again.');
+        }
+        setLoading(false);
+    };
+
+    const handleSignup = async () => {
+        setErr(''); setSuccessMsg('');
+        if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
+            setErr('Please fill in all fields.'); return;
+        }
+        if (!validateEmail(email)) { setErr('Please enter a valid email address.'); return; }
+        if (password.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+        if (password !== confirmPassword) { setErr('Passwords do not match.'); return; }
+        setLoading(true);
+        try {
+            // Replace this block with your real auth logic e.g. Firebase, Supabase, etc.
+            await new Promise(r => setTimeout(r, 1000));
+            setSuccessMsg('Account created! You can now log in.');
+            switchMode('login');
+        } catch (e) {
+            setErr(e.message || 'Signup failed. Please try again.');
+        }
+        setLoading(false);
+    };
+
+    const handleKey = (e) => { if (e.key === 'Enter') mode === 'login' ? handleLogin() : handleSignup(); };
+
+    const isLoginDisabled = loading || !email.trim() || !password.trim();
+    const isSignupDisabled = loading || !name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim();
 
     return (
         <div style={S.wrap}>
@@ -220,78 +304,119 @@ export default function ApiKeyScreen({ onSave }) {
                 <div style={S.subtitle}>Professional AI Academic Suite</div>
 
                 <div style={S.tabs}>
-                    <button style={S.tab(mode === 'login')} onClick={() => setMode('login')}>Login</button>
-                    <button style={S.tab(mode === 'register')} onClick={() => setMode('register')}>Get Started</button>
+                    <button style={S.tab(mode === 'login')} onClick={() => switchMode('login')}>Login</button>
+                    <button style={S.tab(mode === 'signup')} onClick={() => switchMode('signup')}>Sign Up</button>
                 </div>
 
                 {mode === 'login' ? (
                     <div style={{ width: '100%' }}>
                         <div style={S.fieldWrap}>
-                            <label style={S.label}>Your Anthropic API Key</label>
-                            <div style={S.inputRow}>
-                                <input
-                                    value={key}
-                                    onChange={e => setKey(e.target.value)}
-                                    onKeyDown={handleKey}
-                                    placeholder="sk-ant-..."
-                                    type={show ? 'text' : 'password'}
-                                    style={S.input}
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                />
-                                <button 
-                                    style={S.eyeBtn} 
-                                    onClick={() => setShow(s => !s)} 
-                                    tabIndex={-1} 
-                                    type="button"
-                                    title={show ? "Hide key" : "Show key"}
-                                >
-                                    {show ? '🔒' : '👁'}
-                                </button>
-                            </div>
-                            {err && <div style={S.err}>⚠️ {err}</div>}
+                            <label style={S.label}>Email</label>
+                            <FocusInput
+                                type="email"
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="email"
+                                spellCheck={false}
+                            />
                         </div>
 
-                        <button
-                            onClick={test}
-                            style={{ 
-                                ...S.submitBtn, 
-                                opacity: testing || !key.trim() ? 0.6 : 1, 
-                                cursor: testing || !key.trim() ? 'not-allowed' : 'pointer',
-                                transform: testing ? 'scale(0.98)' : 'none'
-                            }}
-                            disabled={testing || !key.trim()}
-                        >
-                            {testing ? 'Authenticating...' : 'Sign In'} {!testing && '→'}
+                        <div style={S.fieldWrap}>
+                            <label style={S.label}>Password</label>
+                            <FocusInput
+                                type={showPass ? 'text' : 'password'}
+                                placeholder="Enter your password"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="current-password"
+                                spellCheck={false}
+                            >
+                                <button style={S.eyeBtn} onClick={() => setShowPass(s => !s)} tabIndex={-1} type="button">
+                                    {showPass ? '🔒' : '👁'}
+                                </button>
+                            </FocusInput>
+                            <button style={S.forgotBtn} onClick={() => setErr('Password reset coming soon.')}>
+                                Forgot password?
+                            </button>
+                        </div>
+
+                        {err && <div style={S.err}>⚠️ {err}</div>}
+                        {successMsg && <div style={S.success}>✓ {successMsg}</div>}
+
+                        <button onClick={handleLogin} style={S.submitBtn(isLoginDisabled)} disabled={isLoginDisabled}>
+                            {loading ? 'Signing in...' : 'Sign In →'}
                         </button>
                     </div>
                 ) : (
-                    <div style={S.regInfo}>
-                        <p style={S.infoText}>
-                            StudyForge uses your own Anthropic API key to ensure privacy and provide direct access to Claude at cost.
-                        </p>
-                        
-                        <a 
-                            href="https://console.anthropic.com/" 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            style={S.extLink}
-                        >
-                            <span>Create Anthropic Account</span>
-                            <span style={{ fontSize: 16 }}>↗</span>
-                        </a>
-
-                        <div style={{ ...S.infoText, fontSize: 12, opacity: 0.7 }}>
-                            1. Sign up at Anthropic Console<br/>
-                            2. Add a small credit balance ($5 min)<br/>
-                            3. Create an API Key and paste it here
+                    <div style={{ width: '100%' }}>
+                        <div style={S.fieldWrap}>
+                            <label style={S.label}>Full Name</label>
+                            <FocusInput
+                                type="text"
+                                placeholder="Your full name"
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="name"
+                                spellCheck={false}
+                            />
                         </div>
 
-                        <button 
-                            onClick={() => setMode('login')}
-                            style={{ ...S.extLink, background: 'transparent', border: 'none', color: '#4f5ef7' }}
-                        >
-                            Already have a key? Login
+                        <div style={S.fieldWrap}>
+                            <label style={S.label}>Email</label>
+                            <FocusInput
+                                type="email"
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="email"
+                                spellCheck={false}
+                            />
+                        </div>
+
+                        <div style={S.fieldWrap}>
+                            <label style={S.label}>Password</label>
+                            <FocusInput
+                                type={showPass ? 'text' : 'password'}
+                                placeholder="Min. 8 characters"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="new-password"
+                                spellCheck={false}
+                            >
+                                <button style={S.eyeBtn} onClick={() => setShowPass(s => !s)} tabIndex={-1} type="button">
+                                    {showPass ? '🔒' : '👁'}
+                                </button>
+                            </FocusInput>
+                        </div>
+
+                        <div style={S.fieldWrap}>
+                            <label style={S.label}>Confirm Password</label>
+                            <FocusInput
+                                type={showConfirm ? 'text' : 'password'}
+                                placeholder="Repeat your password"
+                                value={confirmPassword}
+                                onChange={e => setConfirmPassword(e.target.value)}
+                                onKeyDown={handleKey}
+                                autoComplete="new-password"
+                                spellCheck={false}
+                            >
+                                <button style={S.eyeBtn} onClick={() => setShowConfirm(s => !s)} tabIndex={-1} type="button">
+                                    {showConfirm ? '🔒' : '👁'}
+                                </button>
+                            </FocusInput>
+                        </div>
+
+                        {err && <div style={S.err}>⚠️ {err}</div>}
+                        {successMsg && <div style={S.success}>✓ {successMsg}</div>}
+
+                        <button onClick={handleSignup} style={S.submitBtn(isSignupDisabled)} disabled={isSignupDisabled}>
+                            {loading ? 'Creating account...' : 'Create Account →'}
                         </button>
                     </div>
                 )}
@@ -304,4 +429,3 @@ export default function ApiKeyScreen({ onSave }) {
         </div>
     );
 }
-
