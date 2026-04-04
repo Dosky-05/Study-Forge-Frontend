@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+const BASE = import.meta.env.VITE_API_URL || 'https://study-forge-usyo.onrender.com';
+
 const S = {
     wrap: {
         minHeight: '100vh',
@@ -186,22 +188,6 @@ const S = {
         width: '100%',
         textAlign: 'right',
     },
-    divider: {
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        margin: '8px 0',
-    },
-    dividerLine: {
-        flex: 1,
-        height: 1,
-        background: '#2d325a',
-    },
-    dividerText: {
-        color: '#5a607a',
-        fontSize: 12,
-    },
     brand: {
         marginTop: 40,
         display: 'flex',
@@ -211,7 +197,7 @@ const S = {
     },
 };
 
-function FocusInput({ type, placeholder, value, onChange, onKeyDown, autoComplete, spellCheck, style, children }) {
+function FocusInput({ type, placeholder, value, onChange, onKeyDown, autoComplete, spellCheck, children }) {
     const [focused, setFocused] = useState(false);
     const hasEye = !!children;
     return (
@@ -233,7 +219,7 @@ function FocusInput({ type, placeholder, value, onChange, onKeyDown, autoComplet
     );
 }
 
-export default function AuthScreen({ onLogin }) {
+export default function ApiKeyScreen({ onLogin }) {
     const [mode, setMode] = useState('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -262,9 +248,15 @@ export default function AuthScreen({ onLogin }) {
         if (!validateEmail(email)) { setErr('Please enter a valid email address.'); return; }
         setLoading(true);
         try {
-            // Replace this block with your real auth logic e.g. Firebase, Supabase, etc.
-            await new Promise(r => setTimeout(r, 1000));
-            onLogin({ email });
+            const res = await fetch(`${BASE}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email.trim(), password }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || data.error || 'Login failed. Please try again.');
+            localStorage.setItem('token', data.token);
+            onLogin(data.user);
         } catch (e) {
             setErr(e.message || 'Login failed. Please try again.');
         }
@@ -277,12 +269,17 @@ export default function AuthScreen({ onLogin }) {
             setErr('Please fill in all fields.'); return;
         }
         if (!validateEmail(email)) { setErr('Please enter a valid email address.'); return; }
-        if (password.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+        if (password.length < 6) { setErr('Password must be at least 6 characters.'); return; }
         if (password !== confirmPassword) { setErr('Passwords do not match.'); return; }
         setLoading(true);
         try {
-            // Replace this block with your real auth logic e.g. Firebase, Supabase, etc.
-            await new Promise(r => setTimeout(r, 1000));
+            const res = await fetch(`${BASE}/auth/signup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email.trim(), password, name: name.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || data.error || 'Signup failed. Please try again.');
             setSuccessMsg('Account created! You can now log in.');
             switchMode('login');
         } catch (e) {
@@ -382,7 +379,7 @@ export default function AuthScreen({ onLogin }) {
                             <label style={S.label}>Password</label>
                             <FocusInput
                                 type={showPass ? 'text' : 'password'}
-                                placeholder="Min. 8 characters"
+                                placeholder="Min. 6 characters"
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
                                 onKeyDown={handleKey}

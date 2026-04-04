@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { C, card, btn, inp } from '../theme';
-import { ai, parseJSON } from '../utils/ai';
+import { apiFetch, parseJSON } from '../utils/ai';
 
 export default function Plan({ courses, plan, setPlan, examWeeks, setExamWeeks, notify, isMobile }) {
     const [loading, setLoading] = useState(false);
@@ -14,14 +14,15 @@ export default function Plan({ courses, plan, setPlan, examWeeks, setExamWeeks, 
             const courseList = courses.map(c =>
                 `Course: ${c.name}\nFiles: ${c.files.map(f => f.name).join(', ')}\nContent: ${c.files[0]?.text?.slice(0, 300) || '[PDF file]'}`
             ).join('\n\n');
-            const prompt = `Student has ${examWeeks} weeks until exam, studies ${hpd} hours/day.
-Course materials:\n${courseList}
-
-Make a reading schedule from today (${new Date().toISOString().split('T')[0]}).
-Return ONLY a JSON array, no extra text:
-[{"date":"YYYY-MM-DD","course":"name","topic":"chapter/topic","pages":"Pages X-Y","duration":"Xh","done":false}]`;
-            const text = await ai([{ role: 'user', content: prompt }], 'Return only valid JSON array.', online);
-            const parsed = parseJSON(text);
+            const examDate = new Date();
+            examDate.setDate(examDate.getDate() + examWeeks * 7);
+            const result = await apiFetch('/api/plan', {
+                content: courseList,
+                examDate: examDate.toISOString().split('T')[0],
+                hoursPerDay: hpd
+            });
+            const raw = result?.plan || result?.data || result;
+            const parsed = Array.isArray(raw) ? raw : parseJSON(raw);
             if (parsed?.length) {
                 setPlan(parsed.map((p, i) => ({ ...p, id: 'p' + i })));
                 notify(`✓ ${parsed.length}-item plan created!`);
@@ -53,7 +54,7 @@ Return ONLY a JSON array, no extra text:
                     <div style={{ background: C.s, color: C.a, width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⚙</div>
                     Generate Schedule
                 </div>
-                
+
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 24, marginBottom: 24 }}>
                     <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: C.mu, letterSpacing: '0.05em', marginBottom: 8 }}>HOURS / DAY</div>
@@ -75,7 +76,7 @@ Return ONLY a JSON array, no extra text:
                     <input type="checkbox" checked={online} onChange={e => setOnline(e.target.checked)} style={{ width: 16, height: 16 }} />
                     Cross-reference online data <span style={{ color: C.mu, fontStyle: 'italic' }}>(uses more tokens)</span>
                 </label>
-                
+
                 <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: 16 }}>
                     <button onClick={gen} style={{ ...btn('p'), padding: '14px 24px', fontSize: 15 }} disabled={loading || !courses.length}>
                         {loading ? '⏳ Generating...' : '✦ Generate My Plan'}
@@ -128,12 +129,12 @@ Return ONLY a JSON array, no extra text:
             ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.8fr) minmax(0, 1fr)', gap: 24 }}>
                     {/* Left Empty State Panel */}
-                    <div style={{ 
+                    <div style={{
                         ...card(), background: 'transparent', border: `1px dashed ${C.b}`,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                         textAlign: 'center', padding: isMobile ? '40px 20px' : '60px 40px', minHeight: 300
                     }}>
-                        <div style={{ 
+                        <div style={{
                             width: 80, height: 80, borderRadius: 40, background: C.s, border: `1px solid ${C.b}`,
                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: C.mu,
                             marginBottom: 24, boxShadow: `0 0 40px rgba(0,0,0,0.3)`

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { C, card, btn, inp } from '../theme';
-import { ai, parseJSON } from '../utils/ai';
+import { apiFetch, parseJSON } from '../utils/ai';
 
 export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
     const [quiz, setQuiz] = useState(null);
@@ -15,10 +15,10 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
         if (!course) { notify('Select a course'); return; }
         setLoading(true); setQuiz(null); setAnswers({}); setSubmitted(false);
         try {
-            const fileContent = course.files.slice(0, 2).map(f => f.text ? (f.text || '').slice(0, 3000) : '[PDF content]').join('\n---\n');
-            const prompt = `Create 6 multiple-choice questions from:\n${fileContent}\n${online ? 'Search online for current info on these topics.' : ''}\nReturn ONLY JSON array: [{"q":"question","options":["A","B","C","D"],"answer":0,"explanation":"why"}]`;
-            const text = await ai([{ role: 'user', content: prompt }], 'Return only valid JSON array.', online);
-            const parsed = parseJSON(text);
+            const fileContent = course.files.slice(0, 2).map(f => (f.text || '').slice(0, 4000)).join('\n---\n');
+            const result = await apiFetch('/api/quiz', { content: `Course: ${course.name}\n\n${fileContent}` });
+            const raw = result?.questions || result?.data || result;
+            const parsed = Array.isArray(raw) ? raw : parseJSON(raw);
             if (parsed?.length) { setQuiz({ questions: parsed, course: course.name }); notify('✓ Quiz ready!'); }
             else notify("Couldn't generate quiz, try again");
         } catch (e) { notify('Error: ' + e.message); }
@@ -39,14 +39,14 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
         <div style={{ paddingBottom: 40 }}>
             <div style={{ marginBottom: 36, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: C.a, marginBottom: 8, letterSpacing: '-0.02em' }}>Quiz Mode</div>
-                  <div style={{ width: 48, height: 4, background: C.a, borderRadius: 2 }}></div>
+                    <div style={{ fontSize: 32, fontWeight: 700, color: C.a, marginBottom: 8, letterSpacing: '-0.02em' }}>Quiz Mode</div>
+                    <div style={{ width: 48, height: 4, background: C.a, borderRadius: 2 }}></div>
                 </div>
             </div>
 
             {!quiz ? (
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: 32 }}>
-                    
+
                     {/* LEFT COLUMN: GEN QUIZ */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                         <div style={{ ...card(), padding: 32, position: 'relative', overflow: 'hidden' }}>
@@ -92,12 +92,12 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
                                 </div>
                             </div>
                         ) : (
-                            <div style={{ 
+                            <div style={{
                                 ...card(), background: 'transparent', border: `1px dashed ${C.b}`,
                                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                                 textAlign: 'center', padding: '60px 40px', minHeight: 300
                             }}>
-                                <div style={{ 
+                                <div style={{
                                     width: 80, height: 80, borderRadius: 40, background: C.s, border: `1px solid ${C.b}`,
                                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: C.mu,
                                     marginBottom: 24, boxShadow: `0 0 40px rgba(0,0,0,0.3)`
@@ -121,7 +121,7 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
                         <div style={{ fontSize: 14, fontWeight: 700, color: C.a, letterSpacing: '0.05em' }}>{quiz.course.toUpperCase()}</div>
                         <div style={{ fontSize: 14, color: C.mu, fontWeight: 600 }}>{answered} / {quiz.questions.length} Answered</div>
                     </div>
-                    
+
                     <div style={{ background: C.s, borderRadius: 4, height: 6, marginBottom: 32, overflow: 'hidden' }}>
                         <div style={{ background: `linear-gradient(90deg, ${C.a}, #9d4edd)`, height: '100%', width: ((answered / quiz.questions.length) * 100) + '%', transition: 'width 0.4s ease-out' }} />
                     </div>
@@ -148,8 +148,8 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
                                                     transition: 'all 0.2s', alignItems: 'center'
                                                 }}
                                             >
-                                                <div style={{ 
-                                                    width: 24, height: 24, borderRadius: 12, border: `2px solid ${isSel ? C.a : C.mu}`, 
+                                                <div style={{
+                                                    width: 24, height: 24, borderRadius: 12, border: `2px solid ${isSel ? C.a : C.mu}`,
                                                     marginRight: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                                                     background: isSel ? C.a : 'transparent'
                                                 }}>
@@ -163,7 +163,7 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
                             </div>
                         ))}
                     </div>
-                    
+
                     <div style={{ display: 'flex', gap: 16, padding: '0 8px' }}>
                         <button onClick={submit} style={{ ...btn('p'), flex: 2, padding: '16px', fontSize: 16, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }} disabled={answered < quiz.questions.length}>
                             Submit Quiz ({answered}/{quiz.questions.length})
@@ -176,7 +176,7 @@ export default function Quiz({ courses, qHist, setQHist, notify, isMobile }) {
             {/* QUIZ RESULTS VIEW */}
             {quiz && submitted && (
                 <div style={{ maxWidth: 800, margin: '0 auto' }}>
-                    <div style={{ 
+                    <div style={{
                         ...card(), padding: isMobile ? 24 : 40, textAlign: 'center', marginBottom: 32,
                         background: score / quiz.questions.length >= 0.7 ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)',
                         border: `1px solid ${score / quiz.questions.length >= 0.7 ? '#10b981' : '#ef4444'}`

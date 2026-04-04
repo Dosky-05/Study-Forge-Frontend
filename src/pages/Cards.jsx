@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { C, card, btn, inp } from '../theme';
-import { ai, parseJSON } from '../utils/ai';
+import { apiFetch, parseJSON } from '../utils/ai';
 import { sm2 } from '../utils/sm2';
 
 export default function Cards({ cards, setCards, courses, dueCards, notify, isMobile }) {
@@ -23,16 +23,11 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
         setLoading(true);
         try {
             const fileContent = course.files.slice(0, 2).map(f =>
-                f.b64
-                    ? JSON.stringify([{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.b64 } }, { type: 'text', text: `File: ${f.path}` }])
-                    : `File: ${f.path}\n${(f.text || '').slice(0, 3000)}`
+                `File: ${f.path}\n${(f.text || '').slice(0, 4000)}`
             ).join('\n\n---\n\n');
-            const prompt = `Generate 10 comprehensive flashcards from these study materials.\n${fileContent}\n${online ? 'Search online for additional context on the topics.' : ''}\nReturn ONLY JSON array: [{"q":"question","a":"answer","course":"${course.name}"}]`;
-            const msgs = course.files[0]?.b64
-                ? [{ role: 'user', content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: course.files[0].b64 } }, { type: 'text', text: prompt }] }]
-                : [{ role: 'user', content: prompt }];
-            const text = await ai(msgs, 'Return only valid JSON array.', online);
-            const parsed = parseJSON(text);
+            const result = await apiFetch('/api/flashcards', { content: `Course: ${course.name}\n\n${fileContent}` });
+            const raw = result?.flashcards || result?.data || result;
+            const parsed = Array.isArray(raw) ? raw : parseJSON(raw);
             if (parsed?.length) {
                 setCards(p => [...p, ...parsed.map((c, i) => ({ ...c, id: 'c' + Date.now() + i, ef: 2.5, reps: 0, interval: 1, due: null }))]);
                 notify(`✓ Added ${parsed.length} cards for ${course.name}`);
@@ -60,7 +55,7 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
     if (mode === 'review') {
         if (!queue.length) return (
             <div style={{ paddingBottom: 40, textAlign: 'center', paddingTop: 80 }}>
-                <div style={{ 
+                <div style={{
                     width: 80, height: 80, borderRadius: 40, background: C.s, border: `1px solid ${C.b}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: C.mu,
                     margin: '0 auto 24px', boxShadow: `0 0 40px rgba(0,0,0,0.3)`
@@ -80,33 +75,33 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
                     <span style={{ fontWeight: 600, letterSpacing: '0.05em' }}>{rIdx + 1} / {queue.length}</span>
                     <span style={{ background: C.s, color: C.a, padding: '4px 12px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${C.b}` }}>{curr?.course || 'General'}</span>
                 </div>
-                
+
                 <div style={{ background: C.s, borderRadius: 4, height: 6, marginBottom: 32, overflow: 'hidden' }}>
                     <div style={{ background: `linear-gradient(90deg, ${C.a}, #9d4edd)`, height: '100%', width: ((rIdx / queue.length) * 100) + '%', transition: 'width 0.4s ease-out' }} />
                 </div>
-                
-                <div onClick={() => setShowA(true)} style={{ 
-                    ...card({ 
-                        minHeight: 280, display: 'flex', flexDirection: 'column', justifyContent: 'center', 
-                        textAlign: 'center', cursor: showA ? 'default' : 'pointer', 
+
+                <div onClick={() => setShowA(true)} style={{
+                    ...card({
+                        minHeight: 280, display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                        textAlign: 'center', cursor: showA ? 'default' : 'pointer',
                         borderColor: showA ? C.b : C.a,
                         boxShadow: showA ? 'none' : `0 0 0 1px ${C.a}33, 0 8px 24px rgba(0,0,0,0.4)`,
                         transition: 'all .3s ease', marginBottom: 24, padding: 40,
                         background: showA ? C.s2 : `linear-gradient(180deg, ${C.s2} 0%, rgba(99,91,255,0.03) 100%)`
-                    }) 
+                    })
                 }}>
                     <div style={{ fontSize: 11, color: C.a, fontWeight: 700, letterSpacing: '0.1em', marginBottom: 24 }}>QUESTION</div>
                     <div style={{ fontSize: 24, lineHeight: 1.6, fontWeight: 600, color: C.wh }}>{curr?.q}</div>
                     {!showA && <div style={{ fontSize: 13, color: C.mu, marginTop: 32, fontWeight: 500, opacity: 0.7 }}>Tap card to reveal answer</div>}
                 </div>
-                
+
                 {showA && (
                     <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
                         <div style={{ ...card({ background: 'transparent', textAlign: 'center', border: `1px solid ${C.b}`, marginBottom: 32, padding: 32 }) }}>
                             <div style={{ fontSize: 11, color: '#10b981', fontWeight: 700, letterSpacing: '0.1em', marginBottom: 24 }}>ANSWER</div>
                             <div style={{ fontSize: 18, lineHeight: 1.7, color: C.tx }}>{curr?.a}</div>
                         </div>
-                        
+
                         <div style={{ fontSize: 11, color: C.mu, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 12, textAlign: 'center' }}>HOW WELL DID YOU KNOW THIS?</div>
                         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: 12 }}>
                             {[
@@ -115,15 +110,15 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
                                 ['Good', 3, '#3b82f6', '~' + Math.round((curr?.interval || 1) * 2.5) + 'd'],
                                 ['Easy', 5, '#10b981', '~' + Math.round((curr?.interval || 1) * 3) + 'd'],
                             ].map(([l, q, col, sub]) => (
-                                <button key={l} onClick={() => rate(q)} style={{ 
-                                    background: C.s2, border: `1px solid ${C.b}`, borderTop: `4px solid ${col}`, 
+                                <button key={l} onClick={() => rate(q)} style={{
+                                    background: C.s2, border: `1px solid ${C.b}`, borderTop: `4px solid ${col}`,
                                     padding: isMobile ? '12px 0' : '16px 8px', textAlign: 'center', borderRadius: 8, cursor: 'pointer',
                                     transition: 'background 0.2s, transform 0.1s'
                                 }}
-                                onMouseOver={e => e.currentTarget.style.background = C.s}
-                                onMouseOut={e => e.currentTarget.style.background = C.s2}
-                                onMouseDown={e => e.currentTarget.style.transform = 'scale(0.96)'}
-                                onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+                                    onMouseOver={e => e.currentTarget.style.background = C.s}
+                                    onMouseOut={e => e.currentTarget.style.background = C.s2}
+                                    onMouseDown={e => e.currentTarget.style.transform = 'scale(0.96)'}
+                                    onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                                 >
                                     <div style={{ color: C.wh, fontWeight: 700, fontSize: 16 }}>{l}</div>
                                     <div style={{ fontSize: 12, color: C.mu, marginTop: 6 }}>{sub}</div>
@@ -132,7 +127,7 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
                         </div>
                     </div>
                 )}
-                
+
                 <style>{`
                     @keyframes fadeIn {
                         from { opacity: 0; transform: translateY(10px); }
@@ -152,16 +147,16 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
             {/* Header */}
             <div style={{ marginBottom: 36, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: C.a, marginBottom: 8, letterSpacing: '-0.02em' }}>Flashcards</div>
-                  <div style={{ width: 48, height: 4, background: C.a, borderRadius: 2 }}></div>
+                    <div style={{ fontSize: 32, fontWeight: 700, color: C.a, marginBottom: 8, letterSpacing: '-0.02em' }}>Flashcards</div>
+                    <div style={{ width: 48, height: 4, background: C.a, borderRadius: 2 }}></div>
                 </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: 32 }}>
-                
+
                 {/* LEFT COLUMN */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    
+
                     {/* Review Hero Card */}
                     <div style={{ ...card(), background: dueCards.length > 0 ? `linear-gradient(135deg, ${C.a} 0%, #3026a1 100%)` : 'transparent', border: dueCards.length > 0 ? 'none' : `1px dashed ${C.b}`, padding: isMobile ? '24px' : '40px 32px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
                         {dueCards.length > 0 && <div style={{ position: 'absolute', right: -30, top: -30, fontSize: 180, opacity: 0.1, pointerEvents: 'none' }}>🎯</div>}
@@ -176,7 +171,7 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
                             </>
                         ) : (
                             <>
-                                <div style={{ 
+                                <div style={{
                                     width: 80, height: 80, borderRadius: 40, background: C.s, border: `1px solid ${C.b}`,
                                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: C.mu,
                                     marginBottom: 24, boxShadow: `0 0 40px rgba(0,0,0,0.3)`
@@ -217,7 +212,7 @@ export default function Cards({ cards, setCards, courses, dueCards, notify, isMo
 
                 {/* RIGHT COLUMN */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    
+
                     {/* Add Custom Card */}
                     <div style={{ ...card(), padding: 24 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: C.mu, letterSpacing: '0.05em', marginBottom: 16 }}>+ ADD CARD MANUALLY</div>
