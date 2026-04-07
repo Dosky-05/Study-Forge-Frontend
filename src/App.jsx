@@ -22,7 +22,12 @@ export default function App() {
     const [toast, setToast] = useState('');
     const [theme, setTheme] = useState(() => LS.get('sf_theme', 'dark'));
     const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
-    const [profile, setProfile] = useState(() => LS.get('sf_profile', { name: 'Desire', bio: 'AI Researcher', avatar: 'Desire' }));
+    const loggedInUser = LS.get('sf_user', null);
+    const [profile, setProfile] = useState(() => LS.get('sf_profile', {
+        name: loggedInUser?.name || 'Student',
+        bio: 'StudyForge User',
+        avatar: loggedInUser?.name || 'Student'
+    }));
     const [showProfile, setShowProfile] = useState(false);
 
     const notify = (msg, dur = 3500) => { setToast(msg); setTimeout(() => setToast(''), dur); };
