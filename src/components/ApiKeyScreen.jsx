@@ -255,6 +255,7 @@ export default function ApiKeyScreen({ onLogin }) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || data.error || 'Login failed. Please try again.');
+            localStorage.setItem('sf_user', JSON.stringify(data.user));
             localStorage.setItem('token', data.token);
             onLogin(data.user);
         } catch (e) {
