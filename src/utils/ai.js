@@ -22,6 +22,7 @@ export async function apiFetch(endpoint, body = null) {
 
 // ── JSON parser (handles markdown fences) ──
 export function parseJSON(text) {
+    if (typeof text !== 'string') return text;
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     try { return JSON.parse(clean); } catch { }
     const m = clean.match(/\[[\s\S]*\]/);
