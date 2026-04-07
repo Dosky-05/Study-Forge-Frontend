@@ -24,7 +24,7 @@ export default function App() {
     const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
     const loggedInUser = LS.get('sf_user', null);
     const [profile, setProfile] = useState(() => LS.get('sf_profile', {
-        name: loggedInUser?.name || 'Student',
+        name: loggedInUser?.name || loggedInUser?.email?.split('@')[0] || 'Student',
         bio: 'StudyForge User',
         avatar: loggedInUser?.name || 'Student'
     }));
@@ -177,7 +177,7 @@ export default function App() {
                             )}
                         </button>
                         <button
-                            onClick={() => { if (confirm('Are you sure you want to log out?')) { LS.set('sf_user', null); localStorage.removeItem('token'); setIsLoggedIn(false); } }}
+                            onClick={() => { if (confirm('Are you sure you want to log out?')) { LS.set('sf_user', null); localStorage.removeItem('token'); localStorage.removeItem('sf_profile'); setIsLoggedIn(false); } }}
                             style={{
                                 background: 'none', border: 'none', color: C.mu, cursor: 'pointer',
                                 fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
