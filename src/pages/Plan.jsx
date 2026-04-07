@@ -12,7 +12,7 @@ export default function Plan({ courses, plan, setPlan, examWeeks, setExamWeeks, 
         setLoading(true);
         try {
             const courseList = courses.map(c =>
-                `Course: ${c.name}\nFiles: ${c.files.map(f => f.name).join(', ')}\nContent: ${c.files[0]?.text?.slice(0, 300) || '[PDF file]'}`
+                `Course: ${c.name}\nFiles: ${c.files.map(f => f.name).join(', ')}\nContent: ${c.files.find(f => f.text)?.text?.slice(0, 500) || c.files.map(f => f.name).join(', ')}`
             ).join('\n\n');
             const examDate = new Date();
             examDate.setDate(examDate.getDate() + examWeeks * 7);
