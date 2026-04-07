@@ -55,7 +55,16 @@ export default function App() {
     }, [theme]);
     useEffect(() => LS.set('sf_profile', profile), [profile]);
 
-    if (!isLoggedIn) return <ApiKeyScreen onLogin={(user) => { LS.set('sf_user', user); setIsLoggedIn(true); }} />;
+    if (!isLoggedIn) return <ApiKeyScreen onLogin={(user) => {
+        LS.set('sf_user', user);
+        const userName = user?.name || user?.email?.split('@')[0] || 'Student';
+        const currentProfile = LS.get('sf_profile', {});
+        const newProfile = { ...currentProfile, name: userName, avatar: currentProfile.avatar || userName, bio: currentProfile.bio || 'StudyForge User' };
+        LS.set('sf_profile', newProfile);
+        setProfile(newProfile);
+        setIsLoggedIn(true);
+    }} />;
+
 
     // Derive courses from files
     const courseMap = {};
