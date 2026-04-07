@@ -23,11 +23,17 @@ export default function App() {
     const [theme, setTheme] = useState(() => LS.get('sf_theme', 'dark'));
     const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
     const loggedInUser = LS.get('sf_user', null);
-    const [profile, setProfile] = useState(() => LS.get('sf_profile', {
-        name: loggedInUser?.name || loggedInUser?.email?.split('@')[0] || 'Student',
-        bio: 'StudyForge User',
-        avatar: loggedInUser?.name || 'Student'
-    }));
+    const [profile, setProfile] = useState(() => {
+        const saved = LS.get('sf_profile', null);
+        const userName = loggedInUser?.name || loggedInUser?.email?.split('@')[0] || 'Student';
+        // Always use the real logged-in user's name — never use a cached name
+        return {
+            ...(saved || {}),
+            name: userName,
+            avatar: saved?.avatar || userName,
+            bio: saved?.bio || 'StudyForge User',
+        };
+    });
     const [showProfile, setShowProfile] = useState(false);
 
     const notify = (msg, dur = 3500) => { setToast(msg); setTimeout(() => setToast(''), dur); };
